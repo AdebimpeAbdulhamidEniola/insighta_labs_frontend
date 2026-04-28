@@ -10,10 +10,6 @@ export const getMe = () => axiosClient.get('/auth/me')
 /**
  * Exchanges the GitHub authorization code and state for access/refresh tokens.
  */
-export const handleOAuthCallback = (code, state) =>
-  axios.get(`${BASE_URL}/auth/github/callback`, {
-    params: { code, state },
-  })
 
 export const logout = (accessToken) =>
   axios.post(

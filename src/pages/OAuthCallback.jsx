@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { handleOAuthCallback } from '../api/authApi';
+import { getMe } from '../api/authApi';
 
 function OAuthCallback() {
   const [searchParams] = useSearchParams();
@@ -10,26 +10,28 @@ function OAuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const code = searchParams.get('code');
-    const state = searchParams.get('state');
+    // 1. Get tokens directly from the URL query string
+    const accessToken = searchParams.get('access_token');
+    const refreshToken = searchParams.get('refresh_token');
 
-    if (code) {
-      handleOAuthCallback(code, state)
+    if (accessToken && refreshToken) {
+      // 2. Temporarily store token to fetch user profile
+      sessionStorage.setItem('access_token', accessToken);
+      
+      // 3. Fetch the actual user data using the new token
+      getMe()
         .then((res) => {
-          // Destructure data returned from your backend
-          const { access_token, refresh_token, user } = res.data;
-          
-          // AuthContext login expects: (access_token, refresh_token, userData)
-          login(access_token, refresh_token, user);
-          
-          // Redirect to the protected dashboard
+          // 4. Update Context with tokens and user data
+          login(accessToken, refreshToken, res.data);
+          // 5. Redirect to dashboard
           navigate('/dashboard');
         })
         .catch((err) => {
-          setError(err.response?.data?.message || 'OAuth login failed');
+          console.error('Failed to fetch user after OAuth:', err);
+          setError('Session established but failed to load user profile.');
         });
     } else {
-      setError('No authorization code received');
+      setError('Authentication failed: No tokens found in callback URL.');
     }
   }, [searchParams, login, navigate]);
 
@@ -52,7 +54,7 @@ function OAuthCallback() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-950">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
-      <p className="text-gray-400 text-sm animate-pulse">Authenticating with GitHub...</p>
+      <p className="text-gray-400 text-sm animate-pulse">Finalizing login...</p>
     </div>
   );
 }

@@ -1,44 +1,70 @@
-// vite-project/src/api/axiosClient.js
-import axios from 'axios';
+// src/api/axiosClient.js
+import axios from 'axios'
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
-    'api-version': '2025-05-15',
+    // TRD requires: X-API-Version: 1  (not 'api-version: 2025-05-15')
+    'X-API-Version': '1',
   },
-  withCredentials: true, // CRITICAL: Send cookies with every request
-});
+  withCredentials: true, // Send HTTP-only cookies on every request
+})
 
-// Response interceptor - handle 401 by attempting token refresh
+// Track whether a refresh is already in-flight to avoid loops
+let isRefreshing = false
+let failedQueue = []
+
+const processQueue = (error) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error)
+    } else {
+      prom.resolve()
+    }
+  })
+  failedQueue = []
+}
+
 axiosClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config
 
-    // If 401 and we haven't retried yet, try refreshing the token
     if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
+      if (isRefreshing) {
+        // Queue this request until the ongoing refresh completes
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        })
+          .then(() => axiosClient(originalRequest))
+          .catch((err) => Promise.reject(err))
+      }
+
+      originalRequest._retry = true
+      isRefreshing = true
 
       try {
-        // Backend reads refresh_token from cookie automatically
+        // Refresh token is in HTTP-only cookie — no body needed
         await axios.post(
           `${import.meta.env.VITE_API_BASE_URL}/auth/refresh`,
           {},
           { withCredentials: true }
-        );
-
-        // Retry the original request (new cookies are set automatically)
-        return axiosClient(originalRequest);
+        )
+        processQueue(null)
+        return axiosClient(originalRequest)
       } catch (refreshError) {
-        // Refresh failed - redirect to login
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
+        processQueue(refreshError)
+        // Hard redirect — session is fully expired
+        window.location.href = '/login'
+        return Promise.reject(refreshError)
+      } finally {
+        isRefreshing = false
       }
     }
 
-    return Promise.reject(error);
+    return Promise.reject(error)
   }
-);
+)
 
-export default axiosClient;
+export default axiosClient

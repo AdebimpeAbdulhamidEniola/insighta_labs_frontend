@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+// src/pages/ProfilesPage.jsx
+import { useEffect, useState, useCallback, startTransition } from 'react'
+import { useAuth } from '../context/useAuth'
 import { getProfiles, createProfile, deleteProfile, exportProfiles } from '../api/profilesApi'
 import Layout from '../components/Layout'
 import ProfileCard from '../components/ProfileCard'
@@ -16,6 +17,7 @@ const ProfilesPage = () => {
   const [meta, setMeta] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Filters
   const [page, setPage] = useState(1)
@@ -32,9 +34,9 @@ const ProfilesPage = () => {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
-  const fetchProfiles = () => {
-    setLoading(true)
-    setError('')
+  const triggerRefresh = () => setRefreshKey((k) => k + 1)
+
+  const buildParams = useCallback(() => {
     const params = { page, limit: 12 }
     if (gender) params.gender = gender
     if (ageGroup) params.age_group = ageGroup
@@ -43,17 +45,41 @@ const ProfilesPage = () => {
     if (maxAge) params.max_age = maxAge
     if (sortBy) params.sort_by = sortBy
     if (order) params.order = order
+    return params
+  }, [page, gender, ageGroup, country, minAge, maxAge, sortBy, order])
+
+  useEffect(() => {
+    let cancelled = false
+    const params = buildParams()
+
+    startTransition(() => {
+      setLoading(true)
+      setError('')
+    })
 
     getProfiles(params)
       .then((res) => {
-        setProfiles(res.data.data)
-        setMeta(res.data)
+        if (!cancelled) {
+          setProfiles(res.data.data)
+          setMeta(res.data)
+          setLoading(false)
+        }
       })
-      .catch((e) => setError(e.response?.data?.message || 'Failed to load profiles'))
-      .finally(() => setLoading(false))
-  }
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e.response?.data?.message || 'Failed to load profiles')
+          setLoading(false)
+        }
+      })
 
-  useEffect(() => { fetchProfiles() }, [page, gender, ageGroup, country, minAge, maxAge, sortBy, order])
+    return () => { cancelled = true }
+  }, [buildParams, refreshKey])
+
+  // Helper: reset page and set filter value
+  const setFilter = (setter) => (value) => {
+    setter(value)
+    setPage(1)
+  }
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -63,7 +89,7 @@ const ProfilesPage = () => {
     try {
       await createProfile(newName.trim())
       setNewName('')
-      fetchProfiles()
+      triggerRefresh()
     } catch (e) {
       setCreateError(e.response?.data?.message || 'Failed to create profile')
     } finally {
@@ -72,10 +98,10 @@ const ProfilesPage = () => {
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this profile?')) return
+    if (!window.confirm('Delete this profile?')) return
     try {
       await deleteProfile(id)
-      fetchProfiles()
+      triggerRefresh()
     } catch (e) {
       alert(e.response?.data?.message || 'Delete failed')
     }
@@ -87,11 +113,13 @@ const ProfilesPage = () => {
       if (gender) params.gender = gender
       if (country) params.country = country
       const res = await exportProfiles(params)
-      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
       const a = document.createElement('a')
       a.href = url
       a.download = `profiles_${Date.now()}.csv`
+      document.body.appendChild(a)
       a.click()
+      a.remove()
       window.URL.revokeObjectURL(url)
     } catch {
       alert('Export failed')
@@ -112,56 +140,93 @@ const ProfilesPage = () => {
 
       {/* Admin: create profile */}
       {isAdmin && (
-        <form onSubmit={handleCreate} className="mb-6 flex gap-3">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New profile name…"
-            className="flex-1 bg-gray-900 border border-gray-700 text-white rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-indigo-500"
-          />
-          <button
-            type="submit"
-            disabled={creating}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-5 py-2 rounded-lg disabled:opacity-50 transition-colors"
-          >
-            {creating ? 'Creating…' : 'Create'}
-          </button>
-          {createError && <p className="text-red-400 text-sm self-center">{createError}</p>}
-        </form>
+        <div className="mb-6">
+          <form onSubmit={handleCreate} className="flex gap-3">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New profile name…"
+              className="flex-1 bg-gray-900 border border-gray-700 text-white rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={creating}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-5 py-2 rounded-lg disabled:opacity-50 transition-colors"
+            >
+              {creating ? 'Creating…' : 'Create'}
+            </button>
+          </form>
+          {createError && <p className="text-red-400 text-sm mt-2">{createError}</p>}
+        </div>
       )}
 
       {/* Filters */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        <select value={gender} onChange={(e) => { setGender(e.target.value); setPage(1) }}
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
-          {GENDERS.map(g => <option key={g} value={g}>{g || 'All genders'}</option>)}
+        <select
+          value={gender}
+          onChange={(e) => setFilter(setGender)(e.target.value)}
+          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+        >
+          {GENDERS.map((g) => (
+            <option key={g} value={g}>{g || 'All genders'}</option>
+          ))}
         </select>
 
-        <select value={ageGroup} onChange={(e) => { setAgeGroup(e.target.value); setPage(1) }}
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
-          {AGE_GROUPS.map(a => <option key={a} value={a}>{a || 'All age groups'}</option>)}
+        <select
+          value={ageGroup}
+          onChange={(e) => setFilter(setAgeGroup)(e.target.value)}
+          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+        >
+          {AGE_GROUPS.map((a) => (
+            <option key={a} value={a}>{a || 'All age groups'}</option>
+          ))}
         </select>
 
-        <input type="text" value={country} onChange={(e) => { setCountry(e.target.value); setPage(1) }}
+        <input
+          type="text"
+          value={country}
+          onChange={(e) => setFilter(setCountry)(e.target.value)}
           placeholder="Country code (e.g. NG)"
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+        />
 
-        <input type="number" value={minAge} onChange={(e) => { setMinAge(e.target.value); setPage(1) }}
+        <input
+          type="number"
+          value={minAge}
+          onChange={(e) => setFilter(setMinAge)(e.target.value)}
           placeholder="Min age"
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+        />
 
-        <input type="number" value={maxAge} onChange={(e) => { setMaxAge(e.target.value); setPage(1) }}
+        <input
+          type="number"
+          value={maxAge}
+          onChange={(e) => setFilter(setMaxAge)(e.target.value)}
           placeholder="Max age"
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+        />
 
-        <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(1) }}
-          className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
-          <option value="">Sort by…</option>
-          <option value="age">Age</option>
-          <option value="name">Name</option>
-          <option value="created_at">Created</option>
-        </select>
+        <div className="flex gap-1">
+          <select
+            value={sortBy}
+            onChange={(e) => setFilter(setSortBy)(e.target.value)}
+            className="flex-1 bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Sort by…</option>
+            <option value="age">Age</option>
+            <option value="name">Name</option>
+            <option value="created_at">Created</option>
+          </select>
+          <select
+            value={order}
+            onChange={(e) => setFilter(setOrder)(e.target.value)}
+            className="bg-gray-900 border border-gray-700 text-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-500"
+          >
+            <option value="asc">↑</option>
+            <option value="desc">↓</option>
+          </select>
+        </div>
       </div>
 
       {/* Results */}
@@ -173,7 +238,7 @@ const ProfilesPage = () => {
         <p className="text-red-400 text-sm">{error}</p>
       ) : (
         <>
-          <p className="text-gray-400 text-sm mb-4">{meta.total} profiles found</p>
+          <p className="text-gray-400 text-sm mb-4">{meta.total ?? 0} profiles found</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {profiles.map((p) => (
               <div key={p.id} className="relative group">

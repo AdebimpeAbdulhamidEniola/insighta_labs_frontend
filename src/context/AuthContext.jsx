@@ -1,23 +1,27 @@
 // src/context/AuthContext.jsx
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext,  useState, useEffect, useCallback, startTransition } from 'react'
 import { getMe, logout as logoutApi } from '../api/authApi'
 
-const AuthContext = createContext(null)
+export const AuthContext = createContext(null)  // ← now exported so useAuth.js can import it
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // On mount, verify session via cookie — no token storage in JS
   const loadUser = useCallback(async () => {
     try {
       const res = await getMe()
-      setUser(res.data.data ?? res.data)
+      startTransition(() => {
+        setUser(res.data.data ?? res.data)
+      })
     } catch {
-      // No valid session cookie — user is not logged in
-      setUser(null)
+      startTransition(() => {
+        setUser(null)
+      })
     } finally {
-      setLoading(false)
+      startTransition(() => {
+        setLoading(false)
+      })
     }
   }, [])
 
@@ -25,8 +29,6 @@ export const AuthProvider = ({ children }) => {
     loadUser()
   }, [loadUser])
 
-  // login() just stores the user object returned after callback;
-  // actual tokens live in HTTP-only cookies set by the backend
   const login = (userData) => {
     setUser(userData)
   }
@@ -47,4 +49,4 @@ export const AuthProvider = ({ children }) => {
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+// ← useAuth removed from here. It now lives in ./useAuth.js

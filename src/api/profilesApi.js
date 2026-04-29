@@ -1,4 +1,8 @@
+// src/api/profilesApi.js
 import axiosClient from './axiosClient'
+
+// axiosClient already sets X-API-Version: 1 globally.
+// These helpers are thin wrappers — keep them consistent.
 
 export const getProfiles = (params = {}) =>
   axiosClient.get('/api/profiles', { params })

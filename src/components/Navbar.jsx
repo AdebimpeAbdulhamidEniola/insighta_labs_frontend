@@ -1,20 +1,14 @@
+// src/components/Navbar.jsx
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { logout as logoutApi } from '../api/authApi'
 
 const Navbar = () => {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   const handleLogout = async () => {
-    try {
-      const token = sessionStorage.getItem('access_token')
-      await logoutApi(token)
-    } catch {
-      // continue even if API call fails
-    }
-    logout()
-    navigate('/login')
+    await logout() // calls backend + clears user state
+    navigate('/login', { replace: true })
   }
 
   return (
@@ -34,9 +28,17 @@ const Navbar = () => {
           <Link to="/search" className="text-gray-300 hover:text-white text-sm transition-colors">
             Search
           </Link>
-          <Link to="/account" className="flex items-center gap-2 text-gray-300 hover:text-white text-sm transition-colors">
+          <Link
+            to="/account"
+            className="flex items-center gap-2 text-gray-300 hover:text-white text-sm transition-colors"
+          >
             {user?.avatar_url && (
-              <img src={user.avatar_url} alt="avatar" className="w-7 h-7 rounded-full" />
+              <img
+                src={user.avatar_url}
+                alt="avatar"
+                className="w-7 h-7 rounded-full"
+                referrerPolicy="no-referrer"
+              />
             )}
             <span>{user?.username}</span>
           </Link>

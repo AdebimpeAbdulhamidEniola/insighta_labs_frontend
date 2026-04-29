@@ -1,60 +1,44 @@
-import axios from 'axios'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL
+// vite-project/src/api/axiosClient.js
+import axios from 'axios';
 
 const axiosClient = axios.create({
-  baseURL: BASE_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
-    'X-API-Version': '1',
+    'api-version': '2025-05-15',
   },
-})
+  withCredentials: true, // CRITICAL: Send cookies with every request
+});
 
-// Attach access token to every request
-axiosClient.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-// Auto-refresh on 401
+// Response interceptor - handle 401 by attempting token refresh
 axiosClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config
+    const originalRequest = error.config;
 
+    // If 401 and we haven't retried yet, try refreshing the token
     if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true
-      const refreshToken = sessionStorage.getItem('refresh_token')
-
-      if (!refreshToken) {
-        sessionStorage.clear()
-        window.location.href = '/login'
-        return Promise.reject(error)
-      }
+      originalRequest._retry = true;
 
       try {
-        const res = await axios.post(`${BASE_URL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        })
+        // Backend reads refresh_token from cookie automatically
+        await axios.post(
+          `${import.meta.env.VITE_API_BASE_URL}/auth/refresh`,
+          {},
+          { withCredentials: true }
+        );
 
-        const { access_token, refresh_token } = res.data
-        sessionStorage.setItem('access_token', access_token)
-        sessionStorage.setItem('refresh_token', refresh_token)
-
-        originalRequest.headers.Authorization = `Bearer ${access_token}`
-        return axiosClient(originalRequest)
-      } catch {
-        sessionStorage.clear()
-        window.location.href = '/login'
-        return Promise.reject(error)
+        // Retry the original request (new cookies are set automatically)
+        return axiosClient(originalRequest);
+      } catch (refreshError) {
+        // Refresh failed - redirect to login
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
       }
     }
 
-    return Promise.reject(error)
+    return Promise.reject(error);
   }
-)
+);
 
-export default axiosClient
+export default axiosClient;

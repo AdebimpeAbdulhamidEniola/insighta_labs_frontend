@@ -5,7 +5,6 @@ const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
-    // TRD requires: X-API-Version: 1  (not 'api-version: 2025-05-15')
     'X-API-Version': '1',
   },
   withCredentials: true, // Send HTTP-only cookies on every request
@@ -32,6 +31,26 @@ axiosClient.interceptors.response.use(
     const originalRequest = error.config
 
     if (error.response?.status === 401 && !originalRequest._retry) {
+
+      // FIX: Do NOT attempt refresh in two situations:
+      //
+      // 1. We are already on /login — there is no session to refresh.
+      //    Trying to refresh here creates a redirect loop that burns
+      //    the auth rate limit before the user even clicks the button.
+      //
+      // 2. The failing request WAS the getMe check itself (/api/users/me).
+      //    This means the user simply has no active session. A refresh
+      //    attempt will also fail and just wastes 2 more rate-limited
+      //    requests for nothing.
+      const isOnLoginPage = window.location.pathname === '/login'
+      const isGetMeRequest = originalRequest.url?.includes('/api/users/me')
+
+      if (isOnLoginPage || isGetMeRequest) {
+        // Just reject silently — AuthContext will set user = null
+        // and ProtectedRoute will redirect to /login cleanly
+        return Promise.reject(error)
+      }
+
       if (isRefreshing) {
         // Queue this request until the ongoing refresh completes
         return new Promise((resolve, reject) => {

@@ -111,7 +111,7 @@ const ProfilesPage = () => {
     try {
       const params = {}
       if (gender) params.gender = gender
-      if (country) params.country.id = country
+      if (country) params.country = country
       const res = await exportProfiles(params)
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
       const a = document.createElement('a')
